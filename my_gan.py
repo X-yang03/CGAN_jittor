@@ -8,6 +8,7 @@ from jittor import nn
 
 if jt.has_cuda:
     jt.flags.use_cuda = 1
+    print("Using CUDA.")
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
@@ -27,6 +28,17 @@ print(opt)
 img_shape = (opt.channels, opt.img_size, opt.img_size)
 #单通道的32*32的灰度图
 
+class Flatten(nn.Module):
+    def execute(self, x):
+        return x.view(x.size(0), -1)
+    
+class Reshape(nn.Module):
+    def __init__(self, factor):
+        super().__init__()
+        self.factor = factor
+    def execute(self, x):
+        return x.view(x.size(0), 1, self.factor, self.factor)
+
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -42,9 +54,12 @@ class Generator(nn.Module):
             return layers
         self.model = nn.Sequential(*block((opt.latent_dim + opt.n_classes), 128, normalize=False), #输入维度为噪声向量维度+类别数
                                    *block(128, 256), 
-                                   *block(256, 512),
+                                   Reshape(16), #将256维的向量重新构建成16*16的图像矩阵
+                                   nn.Upsample(scale_factor=2), #上采样，将图像的长宽各放大一倍,变成32*32
+                                   Flatten(), #将图像矩阵展平
+                                   *block(1024, 1024),
                                    #最终得到一个1024维的向量 
-                                   *block(512, 1024), 
+                                   *block(1024, 1024), 
                                    #重新构建成32*32的图像矩阵
                                    nn.Linear(1024, int(np.prod(img_shape))), 
                                    #激活函数tanh将输出限制在-1到1之间，即起到激活作用（因为后面还要接判别器的第一层），又起到归一作用
@@ -62,22 +77,24 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
         self.label_embedding = nn.Embedding(opt.n_classes, opt.n_classes)
-        self.model = nn.Sequential(nn.Linear((opt.n_classes + int(np.prod(img_shape))), 512), #输入维度为图像向量维度+类别数（即label）
+        self.model = nn.Sequential(nn.Linear((opt.n_classes + int(np.prod(img_shape))), 1024), #输入维度为图像向量维度+类别数（即label）
                                    nn.LeakyReLU(0.2), #激活函数，当输入小于0时，Leaky ReLU会乘以0.2，而不是直接输出0
-                                   nn.Linear(512, 512), 
-                                   nn.Dropout(0.4), 
-                                   nn.LeakyReLU(0.2), 
-                                   nn.Linear(512, 512), 
-                                   nn.Dropout(0.4), #dropout层，防止过拟合，丢弃概率为0.4
-                                   nn.LeakyReLU(0.2), 
-                                   # TODO: 添加最后一个线性层，最终输出为一个实数
-                                   nn.Linear(512, 1),
+                                   Reshape(32), #将1024维的向量重新构建成32*32的图像矩阵
+                                   nn.Conv(1,1,5,1), # 28*28
+                                   nn.LeakyReLU(0.2),
+                                   nn.Pool(2,2), #  14*14
+                                   Flatten(), #将图像矩阵展平,196
+                                   nn.Linear(196, 120),
+                                   nn.LeakyReLU(0.2),
+                                   nn.Linear(120, 84),
+                                   nn.LeakyReLU(0.2),
+                                   nn.Linear(84, 1),
                                    nn.Sigmoid() #归一
                                    )
 
     def execute(self, img, labels):
         #前1024列是图像，后10列是标签
-        d_in = jt.contrib.concat((img.view((img.shape[0], (- 1))), self.label_embedding(labels)), dim=1)
+        d_in = jt.contrib.concat((img.view((img.shape[0], (- 1))), self.label_embedding(labels)), dim=1)  #shape(64, 1024+10)
         # TODO: 将d_in输入到模型中并返回计算结果
         validity = self.model(d_in)
         return validity #返回判别器的输出,即真实图片的概率(归一化后在0-1之间)
@@ -94,7 +111,7 @@ discriminator = Discriminator()
 from jittor.dataset.mnist import MNIST
 import jittor.transform as transform
 transform = transform.Compose([
-    transform.Resize(opt.img_size), #将图片缩放到指定大小
+    transform.Resize(opt.img_size), #将图片缩放到指定大小,1*32*32
     transform.Gray(), #将图片转换为灰度图，单通道
     transform.ImageNormalize(mean=[0.5], std=[0.5]),#进行标准化处理，将像素值缩放到指定的均值和标准差范围内，使其接近标准正态分布
 ])
