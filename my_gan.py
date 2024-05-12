@@ -103,6 +103,9 @@ dataloader = MNIST(train=True, transform=transform).set_attrs(batch_size=opt.bat
 optimizer_G = nn.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 optimizer_D = nn.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 
+G_loss = []
+D_loss = []
+
 from PIL import Image
 def save_image(img, path, nrow=10, padding=5):
     N,C,W,H = img.shape
@@ -187,11 +190,15 @@ for epoch in range(opt.n_epochs):
         d_loss = (d_real_loss + d_fake_loss) / 2
         d_loss.sync() #同步判别器损失（d_loss）的值
         optimizer_D.step(d_loss) #更新判别器的参数
+        
+
         if i  % 50 == 0:
             print(
                 "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
                 % (epoch, opt.n_epochs, i, len(dataloader), d_loss.data, g_loss.data)
             )
+            G_loss.append(g_loss.data[0])
+            D_loss.append(d_loss.data[0])
 
         batches_done = epoch * len(dataloader) + i
         if batches_done % opt.sample_interval == 0:
@@ -217,3 +224,11 @@ min_=img_array.min()
 max_=img_array.max()
 img_array=(img_array-min_)/(max_-min_)*255
 Image.fromarray(np.uint8(img_array)).save("result.png")
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+sns.lineplot(G_loss, label='Generator Loss')
+sns.lineplot(D_loss, label='Discriminator Loss')
+
+plt.show()
