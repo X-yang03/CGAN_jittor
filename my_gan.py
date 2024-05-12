@@ -51,7 +51,7 @@ def weights_init_normal(m):
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
-        self.label_emb = nn.Embedding(opt.n_classes, opt.latent_dim)
+        self.label_emb = nn.Embedding(opt.n_classes, opt.n_classes)
         self.init_size = (opt.img_size // 4)
         # nn.Linear(in_dim, out_dim)表示全连接层
         # in_dim：输入向量维度
@@ -62,7 +62,7 @@ class Generator(nn.Module):
                 layers.append(nn.BatchNorm1d(out_feat, 0.8))# 0.8是momentum参数，控制均值和方差的移动平均值的权重
             layers.append(nn.LeakyReLU(0.2)) #激活函数是ReLu的变种，当输入小于0时，Leaky ReLU会乘以0.2，而不是直接输出0
             return layers
-        self.model = nn.Sequential(nn.Linear(opt.latent_dim * 2, (128 * (self.init_size ** 2))),
+        self.model = nn.Sequential(nn.Linear(opt.latent_dim + opt.n_classes, (128 * (self.init_size ** 2))),
                                     #*block((opt.latent_dim + opt.n_classes),  (128 * (self.init_size ** 2)), normalize=False), #输入维度为噪声向量维度+类别数,输出维度为(64,128)
                                     Reshape(128, self.init_size), #将128维的向量重新构建成8*8的图像矩阵
                                     nn.BatchNorm(128), 
