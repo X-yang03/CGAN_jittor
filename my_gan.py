@@ -51,7 +51,7 @@ def weights_init_normal(m):
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
-        self.label_emb = nn.Embedding(opt.n_classes, opt.n_classes)
+        self.label_emb = nn.Embedding(opt.n_classes, opt.latent_dim)
         self.init_size = (opt.img_size // 4)
         # nn.Linear(in_dim, out_dim)表示全连接层
         # in_dim：输入向量维度
@@ -62,8 +62,8 @@ class Generator(nn.Module):
                 layers.append(nn.BatchNorm1d(out_feat, 0.8))# 0.8是momentum参数，控制均值和方差的移动平均值的权重
             layers.append(nn.LeakyReLU(0.2)) #激活函数是ReLu的变种，当输入小于0时，Leaky ReLU会乘以0.2，而不是直接输出0
             return layers
-        self.model = nn.Sequential(#nn.Linear(opt.latent_dim, (128 * (self.init_size ** 2))),
-                                    *block((opt.latent_dim + opt.n_classes),  (128 * (self.init_size ** 2)), normalize=False), #输入维度为噪声向量维度+类别数,输出维度为(64,128)
+        self.model = nn.Sequential(nn.Linear(opt.latent_dim * 2, (128 * (self.init_size ** 2))),
+                                    #*block((opt.latent_dim + opt.n_classes),  (128 * (self.init_size ** 2)), normalize=False), #输入维度为噪声向量维度+类别数,输出维度为(64,128)
                                     Reshape(128, self.init_size), #将128维的向量重新构建成8*8的图像矩阵
                                     nn.BatchNorm(128), 
                                     nn.Upsample(scale_factor=2), 
@@ -80,7 +80,7 @@ class Generator(nn.Module):
             weights_init_normal(m)
 
     def execute(self, noise, labels):
-        gen_input = jt.contrib.concat((self.label_emb(labels), noise), dim=1)#将噪声和label在第一维度上拼接, shape(64, 110)
+        gen_input = jt.contrib.concat((self.label_emb(labels),noise), dim=1)
         img = self.model(gen_input)
         # 将img从1024维向量变为32*32矩阵
         img = img.view((img.shape[0], *img_shape))
@@ -90,7 +90,7 @@ class Discriminator(nn.Module):
 
     def __init__(self):
         super(Discriminator, self).__init__()
-        self.label_embedding = nn.Embedding(opt.n_classes, opt.n_classes)
+        self.label_embedding = nn.Embedding(opt.n_classes, opt.img_size * opt.img_size)
         self.ds_size = (opt.img_size // (2 ** 4))
         def block(in_filters, out_filters, normalize=True):
             layers = [nn.Conv(in_filters, out_filters, 3, stride=2, padding=1), nn.LeakyReLU(scale=0.2), nn.Dropout(p=0.25)]
@@ -100,9 +100,9 @@ class Discriminator(nn.Module):
                 weights_init_normal(m)
             return layers
 
-        self.model = nn.Sequential(nn.Linear((opt.n_classes + int(np.prod(img_shape))), 1024),
-                                   Reshape(1,32),
-                                   *block(opt.channels, 16, normalize=False), *block(16, 32), *block(32, 64), *block(64, 128),
+        self.model = nn.Sequential(#nn.Linear((opt.n_classes + int(np.prod(img_shape))), 1024),
+                                   #Reshape(1,32),
+                                   *block(2, 16, normalize=False), *block(16, 32), *block(32, 64), *block(64, 128),
                                    Flatten(),
                                    nn.Sequential(nn.Linear((128 * (self.ds_size ** 2)), 1), 
                                    nn.Sigmoid())
@@ -127,7 +127,8 @@ class Discriminator(nn.Module):
 
     def execute(self, img, labels):
         #前1024列是图像，后10列是标签
-        d_in = jt.contrib.concat((img.view((img.shape[0], (- 1))), self.label_embedding(labels)), dim=1)  #shape(64, 1024+10)
+        labels =  self.label_embedding(labels).reshape(img.shape[0], 1, opt.img_size, opt.img_size) 
+        d_in = jt.contrib.concat((labels, img), dim=1)
         # TODO: 将d_in输入到模型中并返回计算结果
         validity = self.model(d_in)
         return validity #返回判别器的输出,即真实图片的概率(归一化后在0-1之间)
