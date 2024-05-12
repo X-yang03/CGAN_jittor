@@ -40,5 +40,5 @@ credentials.json
 /package-lock.json
 /yarn.lock
 # Ignore PNG files
-*.png
+#*.png
 *.pkl
