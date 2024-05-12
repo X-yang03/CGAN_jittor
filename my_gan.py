@@ -33,16 +33,26 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
     
 class Reshape(nn.Module):
-    def __init__(self, factor):
+    def __init__(self, feature,factor):
         super().__init__()
         self.factor = factor
+        self.feature = feature
     def execute(self, x):
-        return x.view(x.size(0), 1, self.factor, self.factor)
+        return x.view(x.size(0), self.feature, self.factor, self.factor)
+    
+def weights_init_normal(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        jt.init.gauss_(m.weight, 0.0, 0.02)
+    elif classname.find("BatchNorm") != -1:
+        jt.init.gauss_(m.weight, 1.0, 0.02)
+        jt.init.constant_(m.bias, 0.0)
 
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
         self.label_emb = nn.Embedding(opt.n_classes, opt.n_classes)
+        self.init_size = (opt.img_size // 4)
         # nn.Linear(in_dim, out_dim)表示全连接层
         # in_dim：输入向量维度
         # out_dim：输出向量维度
@@ -52,18 +62,22 @@ class Generator(nn.Module):
                 layers.append(nn.BatchNorm1d(out_feat, 0.8))# 0.8是momentum参数，控制均值和方差的移动平均值的权重
             layers.append(nn.LeakyReLU(0.2)) #激活函数是ReLu的变种，当输入小于0时，Leaky ReLU会乘以0.2，而不是直接输出0
             return layers
-        self.model = nn.Sequential(*block((opt.latent_dim + opt.n_classes), 128, normalize=False), #输入维度为噪声向量维度+类别数
-                                   *block(128, 256), 
-                                   Reshape(16), #将256维的向量重新构建成16*16的图像矩阵
-                                   nn.Upsample(scale_factor=2), #上采样，将图像的长宽各放大一倍,变成32*32
-                                   Flatten(), #将图像矩阵展平
-                                   *block(1024, 1024),
-                                   #最终得到一个1024维的向量 
-                                   *block(1024, 1024), 
-                                   #重新构建成32*32的图像矩阵
-                                   nn.Linear(1024, int(np.prod(img_shape))), 
-                                   #激活函数tanh将输出限制在-1到1之间，即起到激活作用（因为后面还要接判别器的第一层），又起到归一作用
-                                   nn.Tanh())
+        self.model = nn.Sequential(#nn.Linear(opt.latent_dim, (128 * (self.init_size ** 2))),
+                                    *block((opt.latent_dim + opt.n_classes),  (128 * (self.init_size ** 2)), normalize=False), #输入维度为噪声向量维度+类别数,输出维度为(64,128)
+                                    Reshape(128, self.init_size), #将128维的向量重新构建成8*8的图像矩阵
+                                    nn.BatchNorm(128), 
+                                    nn.Upsample(scale_factor=2), 
+                                    nn.Conv(128, 128, 3, stride=1, padding=1), 
+                                    nn.BatchNorm(128, eps=0.8), 
+                                    nn.LeakyReLU(scale=0.2), 
+                                    nn.Upsample(scale_factor=2), 
+                                    nn.Conv(128, 64, 3, stride=1, padding=1), 
+                                    nn.BatchNorm(64, eps=0.8), 
+                                    nn.LeakyReLU(scale=0.2), 
+                                    nn.Conv(64, opt.channels, 3, stride=1, padding=1), 
+                                    nn.Tanh())
+        for m in self.model:
+            weights_init_normal(m)
 
     def execute(self, noise, labels):
         gen_input = jt.contrib.concat((self.label_emb(labels), noise), dim=1)#将噪声和label在第一维度上拼接, shape(64, 110)
@@ -77,19 +91,38 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
         self.label_embedding = nn.Embedding(opt.n_classes, opt.n_classes)
-        self.model = nn.Sequential(nn.Linear((opt.n_classes + int(np.prod(img_shape))), 1024), #输入维度为图像向量维度+类别数（即label）
-                                   nn.LeakyReLU(0.2), #激活函数，当输入小于0时，Leaky ReLU会乘以0.2，而不是直接输出0
-                                   Reshape(32), #将1024维的向量重新构建成32*32的图像矩阵
-                                   nn.Conv(1,1,5,1), # 28*28
-                                   nn.LeakyReLU(0.2),
-                                   nn.Pool(2,2), #  14*14
-                                   Flatten(), #将图像矩阵展平,196
-                                   nn.Linear(196, 120),
-                                   nn.LeakyReLU(0.2),
-                                   nn.Linear(120, 84),
-                                   nn.LeakyReLU(0.2),
-                                   nn.Linear(84, 1),
-                                   nn.Sigmoid() #归一
+        self.ds_size = (opt.img_size // (2 ** 4))
+        def block(in_filters, out_filters, normalize=True):
+            layers = [nn.Conv(in_filters, out_filters, 3, stride=2, padding=1), nn.LeakyReLU(scale=0.2), nn.Dropout(p=0.25)]
+            if normalize:
+                layers.append(nn.BatchNorm(out_filters, eps=0.8))
+            for m in layers:
+                weights_init_normal(m)
+            return layers
+
+        self.model = nn.Sequential(nn.Linear((opt.n_classes + int(np.prod(img_shape))), 1024),
+                                   Reshape(1,32),
+                                   *block(opt.channels, 16, normalize=False), *block(16, 32), *block(32, 64), *block(64, 128),
+                                   Flatten(),
+                                   nn.Sequential(nn.Linear((128 * (self.ds_size ** 2)), 1), 
+                                   nn.Sigmoid())
+            
+            
+            
+            
+            # nn.Linear((opt.n_classes + int(np.prod(img_shape))), 1024), #输入维度为图像向量维度+类别数（即label）
+            #                        nn.LeakyReLU(0.2), #激活函数，当输入小于0时，Leaky ReLU会乘以0.2，而不是直接输出0
+            #                        Reshape(32), #将1024维的向量重新构建成32*32的图像矩阵
+            #                        nn.Conv(1,1,5,1), # 28*28
+            #                        nn.LeakyReLU(0.2),
+            #                        nn.Pool(2,2), #  14*14
+            #                        Flatten(), #将图像矩阵展平,196
+            #                        nn.Linear(196, 120),
+            #                        nn.LeakyReLU(0.2),
+            #                        nn.Linear(120, 84),
+            #                        nn.LeakyReLU(0.2),
+            #                        nn.Linear(84, 1),
+            #                        nn.Sigmoid() #归一
                                    )
 
     def execute(self, img, labels):
