@@ -66,7 +66,7 @@ class Generator(nn.Module):
                                    nn.Tanh())
 
     def execute(self, noise, labels):
-        gen_input = jt.contrib.concat((self.label_emb(labels), noise), dim=1)#将噪声和label在第一维度上拼接
+        gen_input = jt.contrib.concat((self.label_emb(labels), noise), dim=1)#将噪声和label在第一维度上拼接, shape(64, 110)
         img = self.model(gen_input)
         # 将img从1024维向量变为32*32矩阵
         img = img.view((img.shape[0], *img_shape))
