@@ -134,8 +134,7 @@ class Discriminator(nn.Module):
 
 # 损失函数：平方误差
 # 调用方法：adversarial_loss(网络输出A, 分类标签B)
-# 计算结果：(A-B)^2
-adversarial_loss = nn.MSELoss()
+adversarial_loss = nn.BCELoss()
 
 generator = Generator()
 discriminator = Discriminator()
