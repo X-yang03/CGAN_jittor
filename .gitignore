@@ -2,43 +2,6 @@
 .idea/
 .vscode/
 
-# Ignore compiled binaries and libraries
-*.exe
-*.dll
-*.so
-
-# Ignore build output directories
-/build/
-/dist/
-
-# Ignore system and temporary files
-.DS_Store
-Thumbs.db
-*.tmp
-
-# Ignore log files
-*.log
-
-# Ignore user-specific files
-*.bak
-*.swp
-*.swo
-
-# Ignore configuration files
-config.ini
-config.json
-
-# Ignore sensitive or private information
-secrets.txt
-credentials.json
-
-# Ignore generated documentation
-/docs/
-
-# Ignore dependencies and package files
-/node_modules/
-/package-lock.json
-/yarn.lock
 # Ignore PNG files
 #*.png
 *.pkl
